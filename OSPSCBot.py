@@ -13,6 +13,7 @@ IMAGE_FOLDER = 'LogProcessing' #declares log processing folder
 #Define conversation states
 NEW_LOG_NAME = 1
 NEW_LOG_RECEIPT = 2
+CHECK_PAST_LOG = 11
 
 #enable logging
 logging.basicConfig(
@@ -33,7 +34,7 @@ async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text:str
     # Buttons for the main menu
     main_menu_keyboard = [
         [InlineKeyboardButton("New Log", callback_data='NewLog')],
-        [InlineKeyboardButton("View Log History", callback_data='ViewLogHistory')],
+        [InlineKeyboardButton("View Past Logs", callback_data='ViewPastLogs')],
     ]
     reply_markup=InlineKeyboardMarkup(main_menu_keyboard)
 
@@ -96,6 +97,35 @@ async def ReceiptConfirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Send an image of the receipt you would like to log.")
         return NEW_LOG_RECEIPT
 
+async def ViewPastLogs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.callback_query.answer()
+    #returns a list of tuples of past log_names with timestamps
+    PastLogs_unformatted = FetchPastLogs(update, context)
+
+    if PastLogs_unformatted == None:
+        text = ("No logs found.")
+        await main_menu(update, context, text)
+
+    else:
+        #concactenates it into log name - timestamp
+        PastLogs_formatted = [f"{log[0]} - {log[1]}" for log in PastLogs_unformatted]
+
+        keyboard = []
+        for unformatted, formatted in zip(PastLogs_unformatted, PastLogs_formatted):
+            keyboard.append([InlineKeyboardButton(formatted, callback_data=unformatted)])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("Which would you like to check?", reply_markup=reply_markup)
+        return CHECK_PAST_LOG
+
+# this function retreieves the callback data from whatever button was dynamically pressed in viewpastlogs, and sends it back to FetchLog to get the full details
+async def CheckPastLog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.callback_query.answer()
+    LogToFetch = update.callback_query.data
+    Loginfo = FetchLog(LogToFetch)
+
+
+#start the bot
 async def main():
     bot = telegram.Bot(api_key)
     async with bot:
@@ -111,6 +141,7 @@ if __name__ == '__main__':
         states={
             NEW_LOG_NAME: [MessageHandler(filters.Text & ~filters.command, NewLogName)],
             NEW_LOG_RECEIPT: [MessageHandler(filters.Text & ~filters.command, NewLogReceipt)],
+            CHECK_PAST_LOG: [MessageHandler(filters.Text & ~filters.command, CheckPastLog)],
         },
     )
     
