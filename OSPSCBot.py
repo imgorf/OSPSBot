@@ -1,154 +1,153 @@
 import logging
 import os
 from dotenv import load_dotenv
-from telegram import Update, ForceReply, Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ConversationHandler
-from utility import *
+import telebot
+import json
+from telebot import types
+from utility import *  # Assuming utility.py contains your helper functions
 
+# Load environment variables
+load_dotenv()
+api_key = os.getenv('OSPSCBot_Key')  # Import API key from .env file
+IMAGE_FOLDER = 'LogProcessing'  # Folder for storing receipt images
 
-load_dotenv() #loads env file
-api_key=os.getenv('OSPSCBot_Key') #imports api key from env file
-IMAGE_FOLDER = 'LogProcessing' #declares log processing folder
+# Initialize the bot
+bot = telebot.TeleBot(api_key)
 
-#Define conversation states
-NEW_LOG_NAME = 1
-NEW_LOG_RECEIPT = 2
-CHECK_PAST_LOG = 11
-
-#enable logging
+# Enable logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-#Send a message when the command /start is issued
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    #generate greeting message upon start activation
-    text = f"Hi {user.mention_html()}!"
-    #call main menu function with greeting text
-    await main_menu(update, context, text)
+# Dictionary to store user data temporarily
+user_data = {}
+
+# Send a message when the command /start is issued
+@bot.message_handler(commands=['start'])
+def start(message):
+    user = message.from_user
+    # Generate greeting message
+    text = f"Hi {user.first_name}!"
+    # Call main menu function with greeting text
+    main_menu(message, text)
 
 # Display main menu
-async def main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, text:str):    
+def main_menu(message, text):
     # Buttons for the main menu
-    main_menu_keyboard = [
-        [InlineKeyboardButton("New Log", callback_data='NewLog')],
-        [InlineKeyboardButton("View Past Logs", callback_data='ViewPastLogs')],
-    ]
-    reply_markup=InlineKeyboardMarkup(main_menu_keyboard)
+    main_menu_keyboard = types.InlineKeyboardMarkup([
+        [types.InlineKeyboardButton("New Log", callback_data='NewLog')],
+        [types.InlineKeyboardButton("View Past Logs", callback_data='ViewPastLogs')],
+    ])
 
-    #send the main menu to chat along with greeting
-    await update.message.reply_html(
+    # Send the main menu to chat along with greeting
+    bot.send_message(
+        chat_id=message.chat.id,
         text=text,
-        reply_markup=reply_markup
+        reply_markup=main_menu_keyboard
     )
 
-# begin conversation for making new log
-async def NewLog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.callback_query.answer()
-    #Request user for log name
-    await update.callback_query.message.reply_text("What would you like to name your new log?")
-    return NEW_LOG_NAME
-    
-async def NewLogName(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    log_name = update.message.text
-    #store log name
-    context.user_data['log_name'] = log_name
-    #Request user for receipt
-    await update.message.reply_text("Send an image of the receipt you would like to log.")
-    return NEW_LOG_RECEIPT
+# Handle New Log callback
+@bot.callback_query_handler(func=lambda call: call.data == 'NewLog')
+def new_log(call):
+    # Request user for log name
+    bot.send_message(call.message.chat.id, "What would you like to name your new log?")
+    bot.register_next_step_handler(call.message, new_log_name)
 
-#returns itself if image is rejected by tessaract
-async def NewLogReceipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        user_image = update.message
-        #save the image to LogProcessing
-        photo_file = user_image.photo[-1].get_file()
-        file_path = os.path.join(IMAGE_FOLDER, f"{update.message.from_user.id}_{photo_file.file_id}.jpg")
-        await photo_file.download(file_path)
+# Handle log name input
+def new_log_name(message):
+    log_name = message.text
+    # Store log name in user data
+    user_data[message.chat.id] = {'log_name': log_name}
+    # Request user for receipt
+    bot.send_message(message.chat.id, "Send an image of the receipt you would like to log.")
+    bot.register_next_step_handler(message, new_log_receipt)
+
+# Handle receipt image input
+def new_log_receipt(message):
+    if message.photo:
+        # Save the image to LogProcessing
+        photo_file = bot.get_file(message.photo[-1].file_id)
+        file_path = os.path.join(IMAGE_FOLDER, f"{message.from_user.id}_{photo_file.file_id}.jpg")
+        downloaded_file = bot.download_file(photo_file.file_path)
+        with open(file_path, 'wb') as new_file:
+            new_file.write(downloaded_file)
+
+        # Process the receipt
         receipt_items = ReceiptToText(file_path)
-
         if receipt_items:
-            context.user_data['receipt_items'] = receipt_items
-            formatted_text = "\n".join([f"{item_name}: {item_price}" for item_name, item_price in matches])
-            await update.message.reply_text(formatted_text)
-            receipt_confirmation_keyboard = [
-                [InlineKeyboardButton("Yes", callback_data='ReceiptYes')],
-                [InlineKeyboardButton("No", callback_data='ReceiptNo')],
-            ]
-            reply_markup = InlineKeyboardMarkup(receipt_confirmation_keyboard)
-            await update.message.reply_text("Are these items correct?", reply_markup=reply_markup)
+            user_data[message.chat.id]['receipt_items'] = receipt_items
+            formatted_text = "\n".join([f"{item_name}: {item_price}" for item_name, item_price in receipt_items])
+            bot.send_message(message.chat.id, formatted_text)
 
-        #in case None is returned
+            # Ask for confirmation
+            receipt_confirmation_keyboard = types.InlineKeyboardMarkup([
+                [types.InlineKeyboardButton("Yes", callback_data='ReceiptYes')],
+                [types.InlineKeyboardButton("No", callback_data='ReceiptNo')],
+            ])
+            bot.send_message(message.chat.id, "Are these items correct?", reply_markup=receipt_confirmation_keyboard)
         else:
-            await update.message.reply_text("Please send a clearer image.")
-            return NEW_LOG_RECEIPT
-
-#restart NewLogReceipt if no, save data if yes
-async def ReceiptConfirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()  # Acknowledge the callback query
-
-    if query.data =='ReceiptYes':
-        for item_name, item_price in context.user_data['receipt_items']:
-            AddLog(update, context, item_name, item_price)
-    
-    if query.data =='ReceiptNo':
-        await update.message.reply_text("Send an image of the receipt you would like to log.")
-        return NEW_LOG_RECEIPT
-
-async def ViewPastLogs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.callback_query.answer()
-    #returns a list of tuples of past log_names with timestamps
-    PastLogs_unformatted = FetchPastLogs(update, context)
-
-    if PastLogs_unformatted == None:
-        text = ("No logs found.")
-        await main_menu(update, context, text)
-
+            bot.send_message(message.chat.id, "Please send a clearer image.")
+            bot.register_next_step_handler(message, new_log_receipt)
     else:
-        #concactenates it into log name - timestamp
+        bot.send_message(message.chat.id, "Please send a valid image.")
+        bot.register_next_step_handler(message, new_log_receipt)
+
+# Handle receipt confirmation
+@bot.callback_query_handler(func=lambda call: call.data in ['ReceiptYes', 'ReceiptNo'])
+def receipt_confirmation(call):
+    if call.data == 'ReceiptYes':
+        # Save the log
+        for item_name, item_price in user_data[call.message.chat.id]['receipt_items']:
+            AddLog(call.message, user_data[call.message.chat.id]['log_name'], item_name, item_price)
+        main_menu(call.message, "Log saved successfully!")
+    elif call.data == 'ReceiptNo':
+        # Request a new receipt
+        bot.send_message(call.message.chat.id, "Send an image of the receipt you would like to log.")
+        bot.register_next_step_handler(call.message, new_log_receipt)
+
+# Handle View Past Logs callback
+@bot.callback_query_handler(func=lambda call: call.data == 'ViewPastLogs')
+def view_past_logs(call):
+    # Fetch past logs
+    PastLogs_unformatted = FetchPastLogs(call.message)
+    if not PastLogs_unformatted:
+        text = "No logs found."
+        main_menu(call.message, text)
+    else:
+        # Format logs for display
         PastLogs_formatted = [f"{log[0]} - {log[1]}" for log in PastLogs_unformatted]
-
-        keyboard = []
+        keyboard = types.InlineKeyboardMarkup()
         for unformatted, formatted in zip(PastLogs_unformatted, PastLogs_formatted):
-            keyboard.append([InlineKeyboardButton(formatted, callback_data=unformatted)])
+            #generate buttons with text of the formatted logs, while the log name is the callback
+            log_name = unformatted[0]
+            keyboard.add(types.InlineKeyboardButton(formatted, callback_data=log_name))
+        bot.send_message(call.message.chat.id, "Which would you like to check?", reply_markup=keyboard)
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Which would you like to check?", reply_markup=reply_markup)
-        return CHECK_PAST_LOG
+# Handle Check Past Log callback
+@bot.callback_query_handler(func=lambda call: True)
+def check_past_log(call):
+    log_name = call.data
+    # fetchlog the item_name and item_price using the log_name
+    PastLog_unformatted = FetchLog(log_name)
+    PastLog_formatted = [f"{log[0]} - {log[1]}" for log in PastLog_unformatted]
+    keyboard = types.InlineKeyboardMarkup()
 
-# this function retreieves the callback data from whatever button was dynamically pressed in viewpastlogs, and sends it back to FetchLog to get the full details
-async def CheckPastLog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.callback_query.answer()
-    LogToFetch = update.callback_query.data
-    Loginfo = FetchLog(LogToFetch)
+    for unformatted, formatted in zip(PastLog_unformatted, PastLog_formatted):
+        #generate buttons with item_name and item_price, while the item details are item_name:log_name
+        item_details = f'{unformatted[0]}:{log_name}'
+        keyboard.add(types.InlineKeyboardButton(formatted, callback_data=item_details))
+    #add button for log deletion
+    keyboard.add(types.InlineKeyboardButton('Delete Log', callback_data='DeleteLog'))
+    bot.send_message(call.message.chat.id, 'Which entry would you like to edit?', reply_markup=keyboard)
 
-
-#start the bot
-async def main():
-    bot = telegram.Bot(api_key)
-    async with bot:
-        print(await bot.get_me())
-
-
-if __name__ == '__main__':
-    application = ApplicationBuilder().token(api_key).build()
-
-    #sets conversation states
-    conversation_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],  # Triggered when /start is called
-        states={
-            NEW_LOG_NAME: [MessageHandler(filters.Text & ~filters.command, NewLogName)],
-            NEW_LOG_RECEIPT: [MessageHandler(filters.Text & ~filters.command, NewLogReceipt)],
-            CHECK_PAST_LOG: [MessageHandler(filters.Text & ~filters.command, CheckPastLog)],
-        },
-    )
+@bot.callback_query_handler(func=lambda call: True)
+def edit_log(call):
+    log_details = call.data
+    item_name, log_name = log_details.split(":")
     
-    start_handler = CommandHandler('start', start)
-    application.add_handler(start_handler)
-    application.add_handler(CallbackQueryHandler(NewLog, pattern='^NewLog$'))
-    #add handler for viewing log history
-    application.add_handler(CallbackQueryHandler(ReceiptConfirmation, pattern='^(ReceiptYes|ReceiptNo)$'))
 
-    application.run_polling()
+# Start the bot
+if __name__ == '__main__':
+    print("Bot is running...")
+    bot.polling()
