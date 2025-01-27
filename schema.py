@@ -12,7 +12,7 @@ def create_db():
                     log_name TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                     item_name TEXT,
-                    item_price INTEGER
+                    item_price NUMERIC(10, 2) NOT NULL,
              );
     ''')
 

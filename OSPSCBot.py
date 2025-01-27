@@ -121,31 +121,52 @@ def view_past_logs(call):
         for unformatted, formatted in zip(PastLogs_unformatted, PastLogs_formatted):
             #generate buttons with text of the formatted logs, while the log name is the callback
             log_name = unformatted[0]
-            keyboard.add(types.InlineKeyboardButton(formatted, callback_data=log_name))
+            keyboard.add(types.InlineKeyboardButton(formatted, callback_data=f'check:{log_name}'))
+
         bot.send_message(call.message.chat.id, "Which would you like to check?", reply_markup=keyboard)
 
 # Handle Check Past Log callback
-@bot.callback_query_handler(func=lambda call: True)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('check:'))
 def check_past_log(call):
-    log_name = call.data
+    log_name = call.data.replace('check:', '')
     # fetchlog the item_name and item_price using the log_name
     PastLog_unformatted = FetchLog(log_name)
     PastLog_formatted = [f"{log[0]} - {log[1]}" for log in PastLog_unformatted]
     keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton('Delete Log', callback_data=f'delete:{log_name}'))
 
     for unformatted, formatted in zip(PastLog_unformatted, PastLog_formatted):
-        #generate buttons with item_name and item_price, while the item details are item_name:log_name
-        item_details = f'{unformatted[0]}:{log_name}'
-        keyboard.add(types.InlineKeyboardButton(formatted, callback_data=item_details))
+        #generate buttons with item_name and item_price, while the item details are log_name:item_name
+        item_details = f'{log_name}:{unformatted[0]}'
+        keyboard.add(types.InlineKeyboardButton(formatted, callback_data=f'price:{item_details}'))
     #add button for log deletion
-    keyboard.add(types.InlineKeyboardButton('Delete Log', callback_data='DeleteLog'))
     bot.send_message(call.message.chat.id, 'Which entry would you like to edit?', reply_markup=keyboard)
 
-@bot.callback_query_handler(func=lambda call: True)
-def edit_log(call):
-    log_details = call.data
-    item_name, log_name = log_details.split(":")
-    
+#receives the info about the specific log entry, gets price from user, passes it all to editlog
+@bot.callback_query_handler(func=lambda call: call.data.startswith('price:'))
+def get_log_price(call):
+    log_details = call.data.replace('price:', '')
+    chat_id = call.message.chat.id
+    user_data[chat_id] = {'log_details': log_details}
+    bot.send_message(call.message.chat.id, "What is the new price you would like to assign?")
+    bot.register_next_step_handler_by_chat_id(chat_id, edit_Log)
+
+def edit_Log(message):
+    updated_price = message.text
+    chat_id = message.chat.id
+    log_details = user_data.get(chat_id, {}).get('log_details')
+    log_name, item_name = log_details.split(":")
+    text = EditLog(log_name, item_name, updated_price)
+    main_menu(message, text)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('delete:'))
+def delete_log(call):
+    log_name = call.data.replace('delete:', '')
+    user_id = call.from_user.id
+    text = DeleteLog(log_name, user_id)
+    main_menu(call.message,text)
+
+
 
 # Start the bot
 if __name__ == '__main__':

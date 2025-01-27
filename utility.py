@@ -60,25 +60,42 @@ def FetchLog(log_name):
     return PastLog_unformatted
 
 #function for editing specific log entry
-def EditLog(item_name, log_name):
+def EditLog(log_name, item_name, updated_price):
+    conn = sqlite3.connect('log.db')
+    cursor = conn.cursor()
+
+    if updated_price == 0:
+        cursor.execute('''
+        DELETE FROM log
+        WHERE log_name = ? AND item_name = ?
+        ''', (log_name, item_name))
+        conn.commit()
+        conn.close()
+        return("Entry deleted!")
+
+    else:
+        cursor.execute('''
+        UPDATE log
+        SET item_price = ?
+        WHERE log_name = ? AND item_name = ?
+        ''', (updated_price, log_name, item_name))
+        conn.commit()
+        conn.close()
+        return("Entry edited!")
+    
+#function for deleting entire log_name
+def DeleteLog(log_name, user_id):
     conn = sqlite3.connect('log.db')
     cursor = conn.cursor()
 
     cursor.execute('''
-    SELECT DISTINCT log_name, timestamp
-    FROM log
-    WHERE log_name
-    ''', (user_id,))
-
-    # Store logname and timestamp of all logs associated with user into PastLogs as a set of tuples
-    PastLogs_unformatted = cursor.fetchall()
+    DELETE FROM log
+    WHERE log_name = ? AND user_id = ?
+    ''', (log_name, user_id))
+    conn.commit()
     conn.close()
+    return(f"{log_name} deleted!")
 
-    if PastLogs_unformatted:
-        return PastLogs_unformatted
-    else:
-        return None
-    
 # OCR the receipt, returns either the stripped items and price OR None
 def ReceiptToText(image_path: str):
     try:
