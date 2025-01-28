@@ -9,12 +9,12 @@ def AddLog(message, log_name, item_name, item_price):
     conn = sqlite3.connect('log.db')
     cursor = conn.cursor()
 
-    user_id = message.from_user.id
+    chat_id = message.chat.id
 
     cursor.execute('''
-    INSERT INTO log (user_id, log_name, item_name, item_price)
+    INSERT INTO log (chat_id, log_name, item_name, item_price)
     VALUES (?, ?, ?, ?)
-    ''', (user_id, log_name, item_name, item_price))
+    ''', (chat_id, log_name, item_name, item_price))
 
     conn.commit()
     conn.close()
@@ -24,13 +24,13 @@ def FetchPastLogs(message):
     conn = sqlite3.connect('log.db')
     cursor = conn.cursor()
 
-    user_id = message.from_user.id
+    chat_id = message.chat.id
 
     cursor.execute('''
     SELECT DISTINCT log_name, timestamp
     FROM log
-    WHERE user_id = ?
-    ''', (user_id,))
+    WHERE chat_id = ?
+    ''', (chat_id,))
 
     # Store logname and timestamp of all logs associated with user into PastLogs as a set of tuples
     PastLogs_unformatted = cursor.fetchall()
@@ -44,15 +44,15 @@ def FetchPastLogs(message):
     
 
 # Function for fetching a specific log's details
-def FetchLog(log_name):
+def FetchLog(log_name, chat_id):
     conn = sqlite3.connect('log.db')
     cursor = conn.cursor()
 
     cursor.execute('''
     SELECT item_name, item_price 
     FROM log
-    WHERE log_name = ?
-    ''', (log_name,))
+    WHERE log_name = ? AND chat_id = ?
+    ''', (log_name, chat_id))
 
     # Store item_name and item_price as a list of tuples
     PastLog_unformatted = cursor.fetchall()
@@ -60,15 +60,15 @@ def FetchLog(log_name):
     return PastLog_unformatted
 
 #function for editing specific log entry
-def EditLog(log_name, item_name, updated_price):
+def EditLog(log_name, item_name, updated_price, chat_id):
     conn = sqlite3.connect('log.db')
     cursor = conn.cursor()
 
-    if updated_price == 0:
+    if str(updated_price) == '0':
         cursor.execute('''
         DELETE FROM log
-        WHERE log_name = ? AND item_name = ?
-        ''', (log_name, item_name))
+        WHERE log_name = ? AND item_name = ? AND chat_id = ?
+        ''', (log_name, item_name, chat_id))
         conn.commit()
         conn.close()
         return("Entry deleted!")
@@ -77,21 +77,21 @@ def EditLog(log_name, item_name, updated_price):
         cursor.execute('''
         UPDATE log
         SET item_price = ?
-        WHERE log_name = ? AND item_name = ?
-        ''', (updated_price, log_name, item_name))
+        WHERE log_name = ? AND item_name = ? AND chat_id = ?
+        ''', (updated_price, log_name, item_name, chat_id))
         conn.commit()
         conn.close()
         return("Entry edited!")
     
 #function for deleting entire log_name
-def DeleteLog(log_name, user_id):
+def DeleteLog(log_name, chat_id):
     conn = sqlite3.connect('log.db')
     cursor = conn.cursor()
 
     cursor.execute('''
     DELETE FROM log
-    WHERE log_name = ? AND user_id = ?
-    ''', (log_name, user_id))
+    WHERE log_name = ? AND chat_id = ?
+    ''', (log_name, chat_id))
     conn.commit()
     conn.close()
     return(f"{log_name} deleted!")
@@ -114,7 +114,6 @@ def ReceiptToText(image_path: str):
 
         text = pytesseract.image_to_string(img)
         os.remove(image_path)
-        print("Raw OCR Output:\n", text)
 
         # Regex pattern to identify logged items
         item_price_pattern = r"([A-Za-z\s&]+)\s+(\$?\d+\.\d{2})"
@@ -124,7 +123,7 @@ def ReceiptToText(image_path: str):
         receipt_items = []
         for item_name, item_price in matches:
             if not any(word in item_name.lower() for word in ["tax", "subtotal", "total", "take home", "cashier", "check", "table"]):
-                receipt_items.append((item_name.strip(), item_price.strip()))
+                receipt_items.append((item_name.strip(), item_price.replace('$', '').strip()))
 
         return receipt_items
 

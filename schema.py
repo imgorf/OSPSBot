@@ -8,11 +8,11 @@ def create_db():
     c.execute('''
               CREATE TABLE IF NOT EXISTS log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
+                    chat_id INTEGER,
                     log_name TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                     item_name TEXT,
-                    item_price NUMERIC(10, 2) NOT NULL,
+                    item_price NUMERIC(10, 2)
              );
     ''')
 

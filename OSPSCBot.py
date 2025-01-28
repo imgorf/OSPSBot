@@ -129,8 +129,9 @@ def view_past_logs(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('check:'))
 def check_past_log(call):
     log_name = call.data.replace('check:', '')
-    # fetchlog the item_name and item_price using the log_name
-    PastLog_unformatted = FetchLog(log_name)
+    # fetchlog the item_name and item_price using the log_name and chat_id
+    chat_id = call.message.chat.id
+    PastLog_unformatted = FetchLog(log_name, chat_id)
     PastLog_formatted = [f"{log[0]} - {log[1]}" for log in PastLog_unformatted]
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(types.InlineKeyboardButton('Delete Log', callback_data=f'delete:{log_name}'))
@@ -149,22 +150,27 @@ def get_log_price(call):
     chat_id = call.message.chat.id
     user_data[chat_id] = {'log_details': log_details}
     bot.send_message(call.message.chat.id, "What is the new price you would like to assign?")
-    bot.register_next_step_handler_by_chat_id(chat_id, edit_Log)
+    bot.register_next_step_handler_by_chat_id(chat_id, edit_log)
 
-def edit_Log(message):
+def edit_log(message):
     updated_price = message.text
     chat_id = message.chat.id
+    if updated_price.isnumeric() == False:
+        bot.send_message(message.chat.id, "Please input a numeric value.")
+        bot.register_next_step_handler_by_chat_id(chat_id, edit_log)
+        return
+
     log_details = user_data.get(chat_id, {}).get('log_details')
     log_name, item_name = log_details.split(":")
-    text = EditLog(log_name, item_name, updated_price)
+    text = EditLog(log_name, item_name, updated_price, chat_id)
     main_menu(message, text)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('delete:'))
 def delete_log(call):
     log_name = call.data.replace('delete:', '')
-    user_id = call.from_user.id
-    text = DeleteLog(log_name, user_id)
-    main_menu(call.message,text)
+    chat_id = call.message.chat.id
+    text = DeleteLog(log_name, chat_id)
+    main_menu(call.message, text)
 
 
 
